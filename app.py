@@ -25,9 +25,13 @@ except Exception:
 # Config
 # -----------------------------
 OPENFDA_BASE = "https://api.fda.gov"
-DEFAULT_LIMIT = 25  # keep small for demo speed
+DEFAULT_LIMIT = 25  # keyword results per query
+RECENT_DAYS_DEFAULT = 90
+RECENT_LIMIT_DEFAULT = 75  # recent context per category
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 LOGO_PATH = Path(__file__).parent / "assets" / "RECALL.png"
+
+ALL_CATEGORIES = ["drug", "food", "device"]
 
 
 # -----------------------------
@@ -37,12 +41,19 @@ LOGO_PATH = Path(__file__).parent / "assets" / "RECALL.png"
 class FindingCard:
     id: str
     category: str  # drug/food/device
+    recall_number: str
     product: str
     classification: str
     reason: str
     recalling_firm: str
     recall_initiation_date: str
     status: str
+    distribution_pattern: str
+    code_info: str
+    product_quantity: str
+    voluntary_mandated: str
+    state: str
+    country: str
     summary_text: str
     raw: Dict[str, Any]
 
@@ -62,40 +73,154 @@ def _hash_id(*parts: str) -> str:
 # -----------------------------
 # openFDA client (enforcement)
 # -----------------------------
+@st.cache_data(ttl=60 * 60, show_spinner=False)  # ✅ cache for 1 hour (good for testing many times/day)
+def _openfda_get(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    r = requests.get(endpoint, params=params, timeout=25)
+    if r.status_code == 404:
+        return {"results": []}
+    r.raise_for_status()
+    return r.json()
+
+
+def _build_keyword_queries(keyword: str) -> List[str]:
+    """
+    Multi-query union strategy:
+    - Each query targets different fields to maximize recall coverage.
+    - Keep each query reasonably sized for openFDA's search parser.
+    """
+    k = keyword.replace('"', '\\"').strip()
+
+    # Query 1: core identification fields
+    q1 = (
+        f'product_description:"{k}" OR recalling_firm:"{k}" OR brand_name:"{k}"'
+    )
+
+    # Query 2: safety / reason / codes (very valuable for “why” questions)
+    q2 = (
+        f'reason_for_recall:"{k}" OR code_info:"{k}" OR distribution_pattern:"{k}"'
+    )
+
+    # Query 3: nested openfda fields when present (brand/generic)
+    # (Some records have openfda.* populated; not all.)
+    q3 = (
+        f'openfda.brand_name:"{k}" OR openfda.generic_name:"{k}" OR openfda.substance_name:"{k}"'
+    )
+
+    return [q1, q2, q3]
+
+
 def openfda_enforcement_search(
     category: str,
-    query: str,
-    limit: int = DEFAULT_LIMIT,
+    search_query: str,
+    limit: int,
     api_key: Optional[str] = None,
+    sort: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    category: "drug" | "food" | "device"
-    Uses openFDA enforcement endpoint.
-    """
     endpoint = f"{OPENFDA_BASE}/{category}/enforcement.json"
-
-    # Very simple search: look for query in product_description OR recalling_firm.
-    # openFDA uses Lucene-like search syntax.
-    q = f'product_description:"{query}" OR recalling_firm:"{query}"'
-
-    params = {
-        "search": q,
-        "limit": limit,
-    }
+    params: Dict[str, Any] = {"search": search_query, "limit": int(limit)}
+    if sort:
+        params["sort"] = sort
     if api_key:
         params["api_key"] = api_key
 
-    r = requests.get(endpoint, params=params, timeout=20)
-    if r.status_code == 404:
-        return []
-    r.raise_for_status()
-    data = r.json()
+    data = _openfda_get(endpoint, params)
     return data.get("results", []) or []
 
 
-def normalize_to_cards(category: str, results: List[Dict[str, Any]]) -> List[FindingCard]:
+def openfda_broadened_fetch(
+    keyword: str,
+    categories: List[str],
+    keyword_limit: int,
+    include_recent_context: bool,
+    recent_days: int,
+    recent_limit: int,
+    api_key: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    All categories + multi-query union + recent context (by recall_initiation_date range).
+    Returns raw openFDA rows (mixed categories) with an added "__category" field.
+    """
+    from datetime import datetime, timedelta
+
+    all_rows: List[Dict[str, Any]] = []
+    seen_keys: set = set()
+
+    keyword = (keyword or "").strip()
+    keyword_queries = _build_keyword_queries(keyword) if keyword else []
+
+    # Build date range for recent context
+    today = datetime.utcnow().date()
+    start = today - timedelta(days=int(recent_days))
+    start_s = start.strftime("%Y%m%d")
+    end_s = today.strftime("%Y%m%d")
+
+    for cat in categories:
+        # A) Keyword expansion (3 queries)
+        for q in keyword_queries:
+            try:
+                rows = openfda_enforcement_search(
+                    category=cat,
+                    search_query=q,
+                    limit=keyword_limit,
+                    api_key=api_key,
+                )
+            except Exception:
+                rows = []
+
+            for r in rows:
+                recall_number = _safe_get(r, "recall_number", "").strip()
+                product = _safe_get(r, "product_description", "").strip()
+                firm = _safe_get(r, "recalling_firm", "").strip()
+                init_date = _safe_get(r, "recall_initiation_date", "").strip()
+
+                # Dedup key: prefer recall_number; else fallback on stable tuple
+                dedupe_key = f"{cat}|{recall_number}" if recall_number else f"{cat}|{product}|{firm}|{init_date}"
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+
+                rr = dict(r)
+                rr["__category"] = cat
+                all_rows.append(rr)
+
+        # B) Recent context (pull last N days even if it doesn’t match keyword)
+        if include_recent_context:
+            recent_q = f"recall_initiation_date:[{start_s}+TO+{end_s}]"
+            try:
+                recent_rows = openfda_enforcement_search(
+                    category=cat,
+                    search_query=recent_q,
+                    limit=recent_limit,
+                    api_key=api_key,
+                    sort="recall_initiation_date:desc",
+                )
+            except Exception:
+                recent_rows = []
+
+            for r in recent_rows:
+                recall_number = _safe_get(r, "recall_number", "").strip()
+                product = _safe_get(r, "product_description", "").strip()
+                firm = _safe_get(r, "recalling_firm", "").strip()
+                init_date = _safe_get(r, "recall_initiation_date", "").strip()
+
+                dedupe_key = f"{cat}|{recall_number}" if recall_number else f"{cat}|{product}|{firm}|{init_date}"
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+
+                rr = dict(r)
+                rr["__category"] = cat
+                all_rows.append(rr)
+
+    return all_rows
+
+
+def normalize_to_cards(results: List[Dict[str, Any]]) -> List[FindingCard]:
     cards: List[FindingCard] = []
     for row in results:
+        category = _safe_get(row, "__category", "").strip() or _safe_get(row, "category", "").strip() or "unknown"
+
+        recall_number = _safe_get(row, "recall_number", "").strip()
         product = _safe_get(row, "product_description", "").strip()
         classification = _safe_get(row, "classification", "").strip()
         reason = _safe_get(row, "reason_for_recall", "").strip()
@@ -103,27 +228,52 @@ def normalize_to_cards(category: str, results: List[Dict[str, Any]]) -> List[Fin
         init_date = _safe_get(row, "recall_initiation_date", "").strip()
         status = _safe_get(row, "status", "").strip()
 
-        # Construct a human-readable summary that we embed + display
+        distribution = _safe_get(row, "distribution_pattern", "").strip()
+        code_info = _safe_get(row, "code_info", "").strip()
+        qty = _safe_get(row, "product_quantity", "").strip()
+        vol = _safe_get(row, "voluntary_mandated", "").strip()
+        state = _safe_get(row, "state", "").strip()
+        country = _safe_get(row, "country", "").strip()
+
+        # Richer summary => better embeddings + better RAG answers
         summary = (
             f"[{category.upper()} RECALL] {product}\n"
+            f"Recall #: {recall_number}\n"
             f"Classification: {classification}\n"
             f"Reason: {reason}\n"
             f"Firm: {firm}\n"
             f"Initiation Date: {init_date}\n"
             f"Status: {status}\n"
+            f"Distribution: {distribution}\n"
+            f"Codes/Lots: {code_info}\n"
+            f"Quantity: {qty}\n"
+            f"Voluntary/Mandated: {vol}\n"
+            f"Location: {state}, {country}\n"
         ).strip()
 
-        cid = _hash_id(category, product, firm, init_date, reason, classification)
+        # Prefer a stable ID using recall_number if present
+        if recall_number:
+            cid = _hash_id(category, recall_number)
+        else:
+            cid = _hash_id(category, product, firm, init_date, reason, classification)
+
         cards.append(
             FindingCard(
                 id=cid,
                 category=category,
+                recall_number=recall_number,
                 product=product,
                 classification=classification,
                 reason=reason,
                 recalling_firm=firm,
                 recall_initiation_date=init_date,
                 status=status,
+                distribution_pattern=distribution,
+                code_info=code_info,
+                product_quantity=qty,
+                voluntary_mandated=vol,
+                state=state,
+                country=country,
                 summary_text=summary,
                 raw=row,
             )
@@ -154,7 +304,6 @@ def build_faiss_index(vectors: np.ndarray):
 
 
 def faiss_search(index, query_vec: np.ndarray, top_k: int = 5) -> Tuple[np.ndarray, np.ndarray]:
-    # query_vec should be shape (1, dim)
     scores, ids = index.search(query_vec, top_k)
     return scores[0], ids[0]
 
@@ -164,7 +313,6 @@ def faiss_search(index, query_vec: np.ndarray, top_k: int = 5) -> Tuple[np.ndarr
 # -----------------------------
 @st.cache_resource
 def load_llm():
-    # Flan-T5: use local path if set (avoids hub download); otherwise hub id
     model_name = os.environ.get("RECALL_MODEL_PATH", "google/flan-t5-base")
     tokenizer = T5Tokenizer.from_pretrained(model_name)
     model = T5ForConditionalGeneration.from_pretrained(model_name)
@@ -172,24 +320,23 @@ def load_llm():
 
 
 def answer_with_llm(question: str, context_cards: List[FindingCard]) -> str:
-    """
-    Simple RAG: retrieved cards -> concatenated context -> LLM answer.
-    Uses ONLY provided context.
-    """
     model, tokenizer = load_llm()
 
     context_blocks = []
     for c in context_cards:
         context_blocks.append(
-            f"- Product: {c.product}\n"
+            f"- Category: {c.category}\n"
+            f"  Product: {c.product}\n"
+            f"  Recall #: {c.recall_number}\n"
             f"  Classification: {c.classification}\n"
             f"  Reason: {c.reason}\n"
             f"  Firm: {c.recalling_firm}\n"
             f"  Date: {c.recall_initiation_date}\n"
             f"  Status: {c.status}\n"
+            f"  Distribution: {c.distribution_pattern}\n"
+            f"  Codes/Lots: {c.code_info}\n"
         )
 
-    # Keep prompt bounded for CPU + model context constraints
     context = "\n".join(context_blocks)[:3500]
 
     prompt = f"""
@@ -206,28 +353,15 @@ Context:
 Answer (concise, bullet points if helpful):
 """.strip()
 
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=512,
-    )
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=180,
-        do_sample=False,
-    )
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    outputs = model.generate(**inputs, max_new_tokens=200, do_sample=False)
     return tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
 
 
 # -----------------------------
 # Simple insight helpers
 # -----------------------------
-def top_themes(cards: List[FindingCard], n: int = 5) -> List[Tuple[str, int]]:
-    """
-    Extremely simple "themes": top words in reasons (excluding tiny stopwords).
-    Keeps it prototype-simple.
-    """
+def top_themes(cards: List[FindingCard], n: int = 6) -> List[Tuple[str, int]]:
     stop = set(["the", "and", "or", "for", "with", "due", "to", "of", "in", "on", "a", "an", "is", "are"])
     tokens = []
     for c in cards:
@@ -241,7 +375,6 @@ def top_themes(cards: List[FindingCard], n: int = 5) -> List[Tuple[str, int]]:
 
 
 def _format_recall_date(yyyymmdd: str) -> str:
-    """Turn YYYYMMDD into a readable date (e.g. 'Oct 3, 2025')."""
     if not yyyymmdd or len(yyyymmdd) != 8 or not yyyymmdd.isdigit():
         return yyyymmdd
     try:
@@ -254,10 +387,6 @@ def _format_recall_date(yyyymmdd: str) -> str:
 
 
 def summarize_changes(cards: List[FindingCard]) -> Tuple[str, str, str]:
-    """
-    Prototype "what changed": latest recall date, most common classification, most common status.
-    Returns (latest_date_readable, classification, status) for display.
-    """
     dates = [c.recall_initiation_date for c in cards if c.recall_initiation_date]
     cls = [c.classification for c in cards if c.classification]
     status = [c.status for c in cards if c.status]
@@ -267,9 +396,7 @@ def summarize_changes(cards: List[FindingCard]) -> Tuple[str, str, str]:
             return ""
         return pd.Series(xs).value_counts().index[0]
 
-    latest_raw = ""
-    if dates:
-        latest_raw = sorted(dates)[-1]
+    latest_raw = sorted(dates)[-1] if dates else ""
     latest_readable = _format_recall_date(latest_raw) if latest_raw else ""
     mc_cls = most_common(cls)
     mc_status = most_common(status)
@@ -283,16 +410,23 @@ st.set_page_config(
     page_title="RECALL",
     layout="wide",
     page_icon="📋",
-    initial_sidebar_state="collapsed",  # ✅ mobile-friendly
+    initial_sidebar_state="collapsed",
 )
 
 # -----------------------------
-# Canonical settings (shared between sidebar + main)
+# Canonical settings
 # -----------------------------
 if "category" not in st.session_state:
-    st.session_state.category = "drug"
+    st.session_state.category = "all"  # ✅ default to ALL for broader answers
 if "limit" not in st.session_state:
     st.session_state.limit = DEFAULT_LIMIT
+if "recent_days" not in st.session_state:
+    st.session_state.recent_days = RECENT_DAYS_DEFAULT
+if "recent_limit" not in st.session_state:
+    st.session_state.recent_limit = RECENT_LIMIT_DEFAULT
+if "include_recent" not in st.session_state:
+    st.session_state.include_recent = True
+
 # API key intentionally removed from UI. If you still set OPENFDA_API_KEY in env, it will be used.
 if "api_key" not in st.session_state:
     st.session_state.api_key = os.getenv("OPENFDA_API_KEY", "")
@@ -301,11 +435,17 @@ if "api_key" not in st.session_state:
 def _sync_from_sb():
     st.session_state.category = st.session_state.sb_category
     st.session_state.limit = st.session_state.sb_limit
+    st.session_state.include_recent = st.session_state.sb_include_recent
+    st.session_state.recent_days = st.session_state.sb_recent_days
+    st.session_state.recent_limit = st.session_state.sb_recent_limit
 
 
 def _sync_from_main():
     st.session_state.category = st.session_state.main_category
     st.session_state.limit = st.session_state.main_limit
+    st.session_state.include_recent = st.session_state.main_include_recent
+    st.session_state.recent_days = st.session_state.main_recent_days
+    st.session_state.recent_limit = st.session_state.main_recent_limit
 
 
 # -----------------------------
@@ -329,7 +469,6 @@ st.markdown(
   --radius: 16px;
 }
 
-/* App base */
 html, body, [class*="css"]  { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
 .stApp {
   background: radial-gradient(1000px 600px at 30% 10%, rgba(242,140,108,.10), rgba(0,0,0,0) 60%),
@@ -345,6 +484,12 @@ small, .stCaption, .stMarkdown p { color: var(--muted) !important; }
   padding-top: 2.0rem;
   padding-bottom: 2.5rem;
   max-width: 1200px;
+}
+
+/* ✅ FORCE ALL WIDGET LABELS WHITE (fixes Category + Pick a recall label) */
+div[data-testid="stWidgetLabel"] *{
+  color: #ffffff !important;
+  font-weight: 800 !important;
 }
 
 /* Sidebar */
@@ -372,6 +517,8 @@ input:focus, textarea:focus{
   border-color: var(--border2) !important;
   box-shadow: 0 0 0 4px rgba(242,140,108,.18) !important;
 }
+
+/* Select boxes base */
 div[data-baseweb="select"] > div {
   background: rgba(255,255,255,.06) !important;
   border: 1px solid var(--border) !important;
@@ -380,6 +527,19 @@ div[data-baseweb="select"] > div {
 div[data-baseweb="select"]:focus-within > div{
   border-color: var(--border2) !important;
   box-shadow: 0 0 0 4px rgba(242,140,108,.18) !important;
+}
+
+/* ✅ Keep select inputs WHITE with dark text (Category + Pick a recall dropdowns) */
+div[data-testid="stSelectbox"] > div > div{
+  background: #ffffff !important;
+  border: 1px solid rgba(0,0,0,.18) !important;
+  border-radius: 14px !important;
+}
+div[data-testid="stSelectbox"] span{
+  color: #000000 !important;
+}
+div[data-testid="stSelectbox"] svg{
+  fill: #000000 !important;
 }
 
 /* Buttons */
@@ -458,7 +618,7 @@ hr{
   margin: 1.2rem 0;
 }
 
-/* Your existing summary box (keeps structure, boosts polish) */
+/* Summary box */
 .recall-summary {
   font-family: inherit;
   background: linear-gradient(135deg, rgba(255,255,255,.06) 0%, rgba(255,255,255,.03) 100%);
@@ -494,53 +654,37 @@ header {visibility: hidden;}
   border-color: rgba(255,255,255,.22) !important;
 }
 
-/* Make the main Search term input white with black text */
+/* Main Search term input white with black text */
 div[data-testid="stTextInput"] input[aria-label="Search term"]{
   background: #ffffff !important;
   color: #000000 !important;
   border: 1px solid rgba(0,0,0,.18) !important;
 }
-
 div[data-testid="stTextInput"] input[aria-label="Search term"]::placeholder{
   color: rgba(0,0,0,.55) !important;
 }
 
-div[data-testid="stTextInput"] input[aria-label="Search term"]:focus{
-  border-color: rgba(0,0,0,.28) !important;
-  box-shadow: 0 0 0 4px rgba(255,255,255,.22) !important;
-}
-
-/* FIX: Ask RECALL input text was white on a light background -> force dark text */
+/* Ask RECALL input white with black text */
 div[data-testid="stTextInput"] input[aria-label="Ask a question about these recall results"]{
   background: #ffffff !important;
   color: #000000 !important;
   border: 1px solid rgba(0,0,0,.18) !important;
 }
-
 div[data-testid="stTextInput"] input[aria-label="Ask a question about these recall results"]::placeholder{
   color: rgba(0,0,0,.55) !important;
 }
 
-div[data-testid="stTextInput"] input[aria-label="Ask a question about these recall results"]:focus{
-  border-color: rgba(0,0,0,.28) !important;
-  box-shadow: 0 0 0 4px rgba(255,255,255,.22) !important;
-}
+/* Slider numeric value (keep readable) */
+div[data-testid="stSlider"] span { color: #ffffff !important; }
 
-
-/* -----------------------------
-   MOBILE RESPONSIVE OVERRIDES
-------------------------------*/
+/* Mobile */
 @media (max-width: 768px){
-
-  /* tighter overall padding */
   .block-container{
     padding-top: 1.0rem !important;
     padding-left: 0.85rem !important;
     padding-right: 0.85rem !important;
     padding-bottom: 1.4rem !important;
   }
-
-  /* make any Streamlit horizontal blocks stack vertically */
   div[data-testid="stHorizontalBlock"]{
     flex-direction: column !important;
     gap: 0.75rem !important;
@@ -549,161 +693,33 @@ div[data-testid="stTextInput"] input[aria-label="Ask a question about these reca
     width: 100% !important;
     min-width: 100% !important;
   }
-
-  /* header becomes vertical + readable */
-  .recall-header{
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    gap: 10px !important;
-  }
-  .recall-header-title{
-    font-size: 28px !important;
-    line-height: 1.05 !important;
-  }
-  .recall-header-tagline{
-    font-size: 13px !important;
-  }
-  .recall-header-badge{
-    font-size: 11px !important;
-  }
-
-  /* make buttons and selects feel "thumb friendly" */
   .stButton > button{
     width: 100% !important;
     padding: 0.85rem 1.0rem !important;
     border-radius: 16px !important;
   }
-
-  /* inputs a bit taller on mobile + avoid iOS zoom */
   input, textarea{
     font-size: 16px !important;
     padding-top: 0.75rem !important;
     padding-bottom: 0.75rem !important;
   }
-
-  /* code blocks: wrap instead of forcing sideways scrolling */
   pre, code{
     white-space: pre-wrap !important;
     word-break: break-word !important;
     overflow-x: hidden !important;
     font-size: 12px !important;
   }
-
-  /* dataframe: allow horizontal scroll without breaking layout */
   div[data-testid="stDataFrame"]{
     overflow-x: auto !important;
   }
-
-  /* metrics: less cramped */
-  div[data-testid="stMetric"]{
-    padding: 0.85rem 0.9rem !important;
-  }
-
-  /* sidebar: reduce padding */
-  div[data-testid="stSidebar"]{
-    padding-top: 0.75rem !important;
-  }
 }
-/* =========================
-   FIX: Search Settings (Category + Max results)
-   Make them white with dark text
-========================= */
-
-/* Selectbox (Category) */
-div[data-testid="stSelectbox"] > div > div {
-  background: #ffffff !important;
-  color: #000000 !important;
-  border: 1px solid rgba(0,0,0,.18) !important;
-}
-
-/* Selected value text */
-div[data-testid="stSelectbox"] span {
-  color: #000000 !important;
-}
-
-/* Dropdown arrow */
-div[data-testid="stSelectbox"] svg {
-  fill: #000000 !important;
-}
-
-/* Slider track background */
-div[data-testid="stSlider"] > div {
-  background: transparent !important;
-}
-
-/* Slider label text ("Max results") */
-div[data-testid="stSlider"] label {
-  color: #ffffff !important; /* keep label readable on dark bg */
-}
-
-/* Slider numeric value (e.g., 25) */
-div[data-testid="stSlider"] span {
-  color: #ffffff !important;
-}
-
-/* ---------- Settings Card (sticky + clean) ---------- */
-.settings-card{
-  position: sticky;
-  top: 0;
-  z-index: 999;
-  padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(255,255,255,.06);
-  border: 1px solid rgba(255,255,255,.12);
-  box-shadow: 0 14px 30px rgba(0,0,0,.22);
-  backdrop-filter: blur(10px);
-  margin-bottom: 12px;
-}
-.settings-title{
-  font-weight: 900;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  font-size: 12px;
-  color: rgba(255,255,255,.85);
-}
-
-/* Keep the selectbox input itself white with dark text */
-div[data-testid="stSelectbox"] > div > div{
-  background: #ffffff !important;
-  border: 1px solid rgba(0,0,0,.18) !important;
-}
-div[data-testid="stSelectbox"] span{
-  color: #000000 !important;
-}
-div[data-testid="stSelectbox"] svg{
-  fill: #000000 !important;
-}
-
-/* Make ONLY this selectbox label white */
-div[data-testid="stSelectbox"]:has(div[aria-label="Pick a recall to find similar ones"]) label{
-  color: #ffffff !important;
-  font-weight: 800 !important;
-}
-/* =========================
-   FORCE ALL WIDGET LABELS TO WHITE
-   (Fixes: Category + Pick a recall to find similar ones)
-========================= */
-div[data-testid="stWidgetLabel"] label,
-div[data-testid="stWidgetLabel"] p,
-div[data-testid="stWidgetLabel"] span {
-  color: #ffffff !important;
-  font-weight: 800 !important;
-}
-
-/* Extra specificity for selectbox labels (Streamlit sometimes overrides) */
-div[data-testid="stSelectbox"] div[data-testid="stWidgetLabel"] label,
-div[data-testid="stSelectbox"] div[data-testid="stWidgetLabel"] p {
-  color: #ffffff !important;
-  font-weight: 800 !important;
-}
-
 </style>
     """,
     unsafe_allow_html=True,
 )
 
 # -----------------------------
-# Sidebar (synced) - NO API KEY UI
+# Sidebar (synced)
 # -----------------------------
 with st.sidebar:
     if LOGO_PATH.exists():
@@ -713,31 +729,58 @@ with st.sidebar:
 
     st.selectbox(
         "Category",
-        ["drug", "food", "device"],
-        index=["drug", "food", "device"].index(st.session_state.category),
+        ["all", "drug", "food", "device"],
+        index=["all", "drug", "food", "device"].index(st.session_state.category),
         key="sb_category",
         on_change=_sync_from_sb,
     )
 
     st.slider(
-        "Max results",
-        min_value=5,
-        max_value=50,
+        "Keyword results per query",
+        min_value=10,
+        max_value=100,
         value=int(st.session_state.limit),
         step=5,
         key="sb_limit",
         on_change=_sync_from_sb,
     )
 
-    st.caption("Tip: This prototype works without an API key.")
+    st.toggle(
+        "Include recent context (recommended)",
+        value=bool(st.session_state.include_recent),
+        key="sb_include_recent",
+        on_change=_sync_from_sb,
+    )
+
+    st.slider(
+        "Recent window (days)",
+        min_value=7,
+        max_value=365,
+        value=int(st.session_state.recent_days),
+        step=7,
+        key="sb_recent_days",
+        on_change=_sync_from_sb,
+    )
+
+    st.slider(
+        "Recent records per category",
+        min_value=10,
+        max_value=200,
+        value=int(st.session_state.recent_limit),
+        step=5,
+        key="sb_recent_limit",
+        on_change=_sync_from_sb,
+    )
+
+    st.caption("Tip: Cached API calls make repeated testing fast.")
 
 
 # -----------------------------
-# OPTIONAL VISUAL HEADER (NO LOGIC CHANGES)
+# Header
 # -----------------------------
 st.markdown(
     """
-<div class="recall-header" style="
+<div style="
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -750,15 +793,15 @@ st.markdown(
   margin-bottom: 14px;
 ">
   <div>
-    <div class="recall-header-title" style="font-size:34px; font-weight:900; letter-spacing:-0.03em; line-height:1;">
+    <div style="font-size:34px; font-weight:900; letter-spacing:-0.03em; line-height:1; color:#fff;">
       RECALL<span style="color:#F28C6C;">.</span>
     </div>
-    <div class="recall-header-tagline" style="color:#B8C0D0; font-weight:700; margin-top:6px;">
+    <div style="color:#B8C0D0; font-weight:700; margin-top:6px;">
       FDA recall search • Similarity • Q&A
     </div>
   </div>
-  <div class="recall-header-badge" style="color:#9AA3B6; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:.12em;">
-    Safety intelligence
+  <div style="color:#9AA3B6; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:.12em;">
+    Broadened retrieval
   </div>
 </div>
 """,
@@ -766,42 +809,66 @@ st.markdown(
 )
 
 # -----------------------------
-# Main-page Search Settings (for mobile) - synced - NO API KEY UI
+# Main-page settings (mobile)
 # -----------------------------
-st.markdown(
-    """
-<div class="settings-card">
-  <div class="settings-title">Search Settings</div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
-sc1, sc2 = st.columns([1, 2], gap="large")
+sc1, sc2, sc3 = st.columns([1, 1, 1], gap="large")
 with sc1:
     st.selectbox(
         "Category",
-        ["drug", "food", "device"],
-        index=["drug", "food", "device"].index(st.session_state.category),
+        ["all", "drug", "food", "device"],
+        index=["all", "drug", "food", "device"].index(st.session_state.category),
         key="main_category",
         on_change=_sync_from_main,
     )
 with sc2:
     st.slider(
-        "Max results",
-        min_value=5,
-        max_value=50,
+        "Keyword results per query",
+        min_value=10,
+        max_value=100,
         value=int(st.session_state.limit),
         step=5,
         key="main_limit",
         on_change=_sync_from_main,
     )
+with sc3:
+    st.toggle(
+        "Include recent context",
+        value=bool(st.session_state.include_recent),
+        key="main_include_recent",
+        on_change=_sync_from_main,
+    )
 
+sc4, sc5 = st.columns([1, 1], gap="large")
+with sc4:
+    st.slider(
+        "Recent window (days)",
+        min_value=7,
+        max_value=365,
+        value=int(st.session_state.recent_days),
+        step=7,
+        key="main_recent_days",
+        on_change=_sync_from_main,
+    )
+with sc5:
+    st.slider(
+        "Recent records per category",
+        min_value=10,
+        max_value=200,
+        value=int(st.session_state.recent_limit),
+        step=5,
+        key="main_recent_limit",
+        on_change=_sync_from_main,
+    )
 
-# Canonical values used by the app everywhere (sidebar OR main will update these)
-category = st.session_state.category
-limit = st.session_state.limit
-api_key = st.session_state.api_key  # still supported via env var, but hidden from UI
+# Canonical values
+category_choice = st.session_state.category
+keyword_limit = int(st.session_state.limit)
+include_recent = bool(st.session_state.include_recent)
+recent_days = int(st.session_state.recent_days)
+recent_limit = int(st.session_state.recent_limit)
+api_key = st.session_state.api_key  # hidden from UI; env var only
+
+categories_to_use = ALL_CATEGORIES if category_choice == "all" else [category_choice]
 
 
 # -----------------------------
@@ -809,14 +876,15 @@ api_key = st.session_state.api_key  # still supported via env var, but hidden fr
 # -----------------------------
 st.markdown("## RECALL")
 st.write(
-    "Type a **brand/product keyword** to see recalls. Then use:\n"
-    "- **Find similar recalls** (semantic search)\n"
-    "- **Ask RECALL** (LLM Q&A over retrieved results)\n"
+    "Type a **brand/product keyword** to see recalls. This version pulls:\n"
+    "- **All categories** (drug + food + device)\n"
+    "- **Multiple openFDA queries** (field expansion) + union & dedupe\n"
+    "- **Recent context** (so the AI can answer broader trend questions)\n"
 )
 
 col1, col2 = st.columns([2, 1], gap="large")
 with col1:
-    query = st.text_input("Search term", placeholder="e.g., Tylenol, Ozempic, lettuce, Philips")
+    query = st.text_input("Search term", placeholder="e.g., shrimp, listeria, Ozempic, Philips")
 with col2:
     run_btn = st.button("Search openFDA", use_container_width=True)
 
@@ -828,21 +896,29 @@ if "index" not in st.session_state:
     st.session_state.index = None
 
 if run_btn and query.strip():
-    with st.spinner("Fetching recalls from openFDA..."):
+    with st.spinner("Fetching broadened recall data from openFDA (cached for fast repeat testing)..."):
         try:
-            results = openfda_enforcement_search(category, query.strip(), limit=limit, api_key=api_key or None)
+            raw_rows = openfda_broadened_fetch(
+                keyword=query.strip(),
+                categories=categories_to_use,
+                keyword_limit=keyword_limit,
+                include_recent_context=include_recent,
+                recent_days=recent_days,
+                recent_limit=recent_limit,
+                api_key=api_key or None,
+            )
         except requests.HTTPError as e:
             st.error(f"openFDA request failed: {e}")
-            results = []
+            raw_rows = []
         except Exception as e:
             st.error(f"Unexpected error: {e}")
-            results = []
+            raw_rows = []
 
-    cards = normalize_to_cards(category, results)
+    cards = normalize_to_cards(raw_rows)
     st.session_state.cards = cards
 
     if not cards:
-        st.warning("No recalls found for that query. Try a broader keyword (e.g., 'salad', 'insulin', 'cheese').")
+        st.warning("No recalls found. Try a broader keyword (e.g., 'salad', 'metal', 'contamination').")
     else:
         with st.spinner("Building local embeddings + FAISS index..."):
             model = load_embedder()
@@ -851,7 +927,8 @@ if run_btn and query.strip():
             st.session_state.vectors = vecs
             st.session_state.index = build_faiss_index(vecs)
 
-        st.success(f"Loaded {len(cards)} recall records for semantic search and Q&A.")
+        st.success(f"Loaded {len(cards)} recall records across {', '.join(categories_to_use)} for similarity + AI Q&A.")
+
 
 # --- Display results + insights ---
 cards: List[FindingCard] = st.session_state.cards
@@ -862,7 +939,7 @@ if cards:
     with c1:
         st.metric("Results", len(cards))
     with c2:
-        st.metric("Category", category.upper())
+        st.metric("Categories", "ALL" if category_choice == "all" else category_choice.upper())
     with c3:
         classifications = [c.classification for c in cards if c.classification]
         top_cls = pd.Series(classifications).value_counts().index[0] if classifications else "N/A"
@@ -874,26 +951,12 @@ if cards:
         st.markdown(
             '<div class="recall-summary">'
             '<p class="recall-summary-title">Quick summary</p>'
-            + (
-                f'<p><span class="recall-summary-label">Latest recall date</span> <span class="recall-summary-value">{a}</span></p>'
-                if latest_date
-                else ""
-            )
-            + (
-                f'<p><span class="recall-summary-label">Most common classification</span> <span class="recall-summary-value">{b}</span></p>'
-                if top_class
-                else ""
-            )
-            + (
-                f'<p><span class="recall-summary-label">Most common status</span> <span class="recall-summary-value">{c}</span></p>'
-                if top_status
-                else ""
-            )
+            + (f'<p><span class="recall-summary-label">Latest recall date</span> <span class="recall-summary-value">{a}</span></p>' if latest_date else "")
+            + (f'<p><span class="recall-summary-label">Most common classification</span> <span class="recall-summary-value">{b}</span></p>' if top_class else "")
+            + (f'<p><span class="recall-summary-label">Most common status</span> <span class="recall-summary-value">{c}</span></p>' if top_status else "")
             + "</div>",
             unsafe_allow_html=True,
         )
-    else:
-        st.caption("No high-level summary available for this query.")
 
     themes = top_themes(cards, n=6)
     if themes:
@@ -902,10 +965,12 @@ if cards:
 
     st.divider()
     st.subheader("Results")
+
     df = pd.DataFrame(
         [
             {
-                "id": c.id,
+                "category": c.category,
+                "recall_number": c.recall_number,
                 "product": c.product[:140],
                 "firm": c.recalling_firm[:80],
                 "classification": c.classification,
@@ -916,7 +981,6 @@ if cards:
             for c in cards
         ]
     )
-    # ✅ mobile-friendly height (no logic change)
     st.dataframe(df, use_container_width=True, hide_index=True, height=420)
 
     st.divider()
@@ -926,7 +990,11 @@ if cards:
         "Pick a recall to find similar ones",
         options=[c.id for c in cards],
         format_func=lambda cid: next(
-            (f"{c.product[:80]} – {c.classification} – {c.recall_initiation_date}" for c in cards if c.id == cid),
+            (
+                f"[{c.category}] {c.product[:70]} – {c.classification} – {c.recall_initiation_date}"
+                for c in cards
+                if c.id == cid
+            ),
             cid,
         ),
     )
@@ -941,7 +1009,6 @@ if cards:
         qvec = embed_texts(model, [selected_card.summary_text])  # (1, dim)
         scores, ids = faiss_search(st.session_state.index, qvec, top_k=top_k + 1)
 
-        # Filter out itself
         similar = []
         for score, idx in zip(scores, ids):
             if idx < 0:
@@ -958,21 +1025,21 @@ if cards:
 
         st.write("### Similar recalls")
         if not similar:
-            st.warning("No similar items found (try increasing max results or broaden the search term).")
+            st.warning("No similar items found (try increasing recent records per category or keyword results per query).")
         else:
             for score, c in similar:
                 with st.expander(
-                    f"{c.product[:90]}  |  {c.classification}  |  {c.recall_initiation_date}  (score: {score:.3f})"
+                    f"[{c.category}] {c.product[:80]}  |  {c.classification}  |  {c.recall_initiation_date}  (score: {score:.3f})"
                 ):
                     st.code(c.summary_text)
-                    st.caption(f"Firm: {c.recalling_firm} | Status: {c.status}")
+                    st.caption(f"Firm: {c.recalling_firm} | Status: {c.status} | Recall #: {c.recall_number}")
 
     st.divider()
     st.subheader("Ask RECALL (AI Q&A)")
 
     user_question = st.text_input(
         "Ask a question about these recall results",
-        placeholder="e.g., What are the main reasons for these recalls? Any patterns?",
+        placeholder="e.g., What are the main reasons? Any contamination patterns? Which products are most impacted?",
     )
 
     rag_k = st.slider("Number of recall records to use as context", 3, 12, 6)
@@ -988,6 +1055,7 @@ if cards:
                 for idx in ids:
                     if idx >= 0:
                         retrieved_cards.append(cards[int(idx)])
+
                 answer = answer_with_llm(user_question.strip(), retrieved_cards)
 
             st.markdown("### AI Answer")
@@ -1004,7 +1072,7 @@ if cards:
                 "Please check that you have internet access and try again. "
                 "If you're behind a firewall or offline, download the model once with: "
                 "`huggingface-cli download google/flan-t5-base` then set environment variable "
-                "`RECALL_MODEL_PATH` to the download folder (e.g. `~/cache/hub/models--google--flan-t5-base/snapshots/...`)."
+                "`RECALL_MODEL_PATH` to the download folder."
             )
             st.caption(f"Details: {e}")
 
