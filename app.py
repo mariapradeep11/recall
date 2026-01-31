@@ -604,6 +604,43 @@ div[data-testid="stTextInput"] input[aria-label="Ask a question about these reca
     padding-top: 0.75rem !important;
   }
 }
+/* =========================
+   FIX: Search Settings (Category + Max results)
+   Make them white with dark text
+========================= */
+
+/* Selectbox (Category) */
+div[data-testid="stSelectbox"] > div > div {
+  background: #ffffff !important;
+  color: #000000 !important;
+  border: 1px solid rgba(0,0,0,.18) !important;
+}
+
+/* Selected value text */
+div[data-testid="stSelectbox"] span {
+  color: #000000 !important;
+}
+
+/* Dropdown arrow */
+div[data-testid="stSelectbox"] svg {
+  fill: #000000 !important;
+}
+
+/* Slider track background */
+div[data-testid="stSlider"] > div {
+  background: transparent !important;
+}
+
+/* Slider label text ("Max results") */
+div[data-testid="stSlider"] label {
+  color: #ffffff !important; /* keep label readable on dark bg */
+}
+
+/* Slider numeric value (e.g., 25) */
+div[data-testid="stSlider"] span {
+  color: #ffffff !important;
+}
+
 </style>
     """,
     unsafe_allow_html=True,
