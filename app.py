@@ -680,6 +680,12 @@ div[data-testid="stSelectbox"] svg{
   fill: #000000 !important;
 }
 
+/* Make ONLY this selectbox label white */
+div[data-testid="stSelectbox"]:has(div[aria-label="Pick a recall to find similar ones"]) label{
+  color: #ffffff !important;
+  font-weight: 800 !important;
+}
+
 </style>
     """,
     unsafe_allow_html=True,
