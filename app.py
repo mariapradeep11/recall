@@ -283,8 +283,31 @@ st.set_page_config(
     page_title="RECALL",
     layout="wide",
     page_icon="📋",
-    initial_sidebar_state="collapsed",  # ✅ mobile friendly (sidebar collapsed on phones)
+    initial_sidebar_state="collapsed",  # ✅ mobile-friendly
 )
+
+# -----------------------------
+# Canonical settings (shared between sidebar + main)
+# -----------------------------
+if "category" not in st.session_state:
+    st.session_state.category = "drug"
+if "limit" not in st.session_state:
+    st.session_state.limit = DEFAULT_LIMIT
+if "api_key" not in st.session_state:
+    st.session_state.api_key = os.getenv("OPENFDA_API_KEY", "")
+
+
+def _sync_from_sb():
+    st.session_state.category = st.session_state.sb_category
+    st.session_state.limit = st.session_state.sb_limit
+    st.session_state.api_key = st.session_state.sb_api_key
+
+
+def _sync_from_main():
+    st.session_state.category = st.session_state.main_category
+    st.session_state.limit = st.session_state.main_limit
+    st.session_state.api_key = st.session_state.main_api_key
+
 
 # -----------------------------
 # VISUAL UPGRADE (CSS ONLY)
@@ -568,13 +591,41 @@ div[data-testid="stTextInput"] input[aria-label="Search term"]:focus{
     unsafe_allow_html=True,
 )
 
+# -----------------------------
+# Sidebar (synced)
+# -----------------------------
 with st.sidebar:
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), use_container_width=True)
+
     st.header("Search Settings")
-    category = st.selectbox("Category", ["drug", "food", "device"], index=0)
-    limit = st.slider("Max results", min_value=5, max_value=50, value=DEFAULT_LIMIT, step=5)
-    api_key = st.text_input("openFDA API key (optional)", type="password", value=os.getenv("OPENFDA_API_KEY", ""))
+
+    st.selectbox(
+        "Category",
+        ["drug", "food", "device"],
+        index=["drug", "food", "device"].index(st.session_state.category),
+        key="sb_category",
+        on_change=_sync_from_sb,
+    )
+
+    st.slider(
+        "Max results",
+        min_value=5,
+        max_value=50,
+        value=int(st.session_state.limit),
+        step=5,
+        key="sb_limit",
+        on_change=_sync_from_sb,
+    )
+
+    st.text_input(
+        "openFDA API key (optional)",
+        type="password",
+        value=st.session_state.api_key,
+        key="sb_api_key",
+        on_change=_sync_from_sb,
+    )
+
     st.caption("Tip: API key helps rate limits, but this prototype works without it.")
 
 
@@ -611,6 +662,43 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# -----------------------------
+# Main-page Search Settings (for mobile) - synced
+# -----------------------------
+with st.expander("Search Settings", expanded=False):
+    st.selectbox(
+        "Category",
+        ["drug", "food", "device"],
+        index=["drug", "food", "device"].index(st.session_state.category),
+        key="main_category",
+        on_change=_sync_from_main,
+    )
+    st.slider(
+        "Max results",
+        min_value=5,
+        max_value=50,
+        value=int(st.session_state.limit),
+        step=5,
+        key="main_limit",
+        on_change=_sync_from_main,
+    )
+    st.text_input(
+        "openFDA API key (optional)",
+        type="password",
+        value=st.session_state.api_key,
+        key="main_api_key",
+        on_change=_sync_from_main,
+    )
+
+# Canonical values used by the app everywhere (sidebar OR main will update these)
+category = st.session_state.category
+limit = st.session_state.limit
+api_key = st.session_state.api_key
+
+
+# -----------------------------
+# Main UI
+# -----------------------------
 st.markdown("## RECALL")
 st.write(
     "Type a **brand/product keyword** to see recalls. Then use:\n"
