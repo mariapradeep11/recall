@@ -500,13 +500,32 @@ div[data-testid="stTextInput"] input[aria-label="Search term"]{
   color: #000000 !important;
   border: 1px solid rgba(0,0,0,.18) !important;
 }
+
 div[data-testid="stTextInput"] input[aria-label="Search term"]::placeholder{
   color: rgba(0,0,0,.55) !important;
 }
+
 div[data-testid="stTextInput"] input[aria-label="Search term"]:focus{
   border-color: rgba(0,0,0,.28) !important;
   box-shadow: 0 0 0 4px rgba(255,255,255,.22) !important;
 }
+
+/* FIX: Ask RECALL input text was white on a light background -> force dark text */
+div[data-testid="stTextInput"] input[aria-label="Ask a question about these recall results"]{
+  background: #ffffff !important;
+  color: #000000 !important;
+  border: 1px solid rgba(0,0,0,.18) !important;
+}
+
+div[data-testid="stTextInput"] input[aria-label="Ask a question about these recall results"]::placeholder{
+  color: rgba(0,0,0,.55) !important;
+}
+
+div[data-testid="stTextInput"] input[aria-label="Ask a question about these recall results"]:focus{
+  border-color: rgba(0,0,0,.28) !important;
+  box-shadow: 0 0 0 4px rgba(255,255,255,.22) !important;
+}
+
 
 /* -----------------------------
    MOBILE RESPONSIVE OVERRIDES
