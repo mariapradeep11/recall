@@ -458,6 +458,40 @@ hr{
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
+/* --- Make the main search textbox orange + readable --- */
+.stTextInput input,
+.stTextInput textarea {
+  background: linear-gradient(135deg, rgba(242,140,108,.95) 0%, rgba(224,122,90,.92) 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255,255,255,.18) !important;
+  border-radius: 14px !important;
+  font-weight: 800 !important;
+  caret-color: #ffffff !important;
+}
+
+/* Placeholder text */
+.stTextInput input::placeholder,
+.stTextInput textarea::placeholder {
+  color: rgba(255,255,255,.85) !important;
+  font-weight: 700 !important;
+}
+
+/* Focus ring */
+.stTextInput input:focus,
+.stTextInput textarea:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 4px rgba(242,140,108,.35) !important;
+  border-color: rgba(255,255,255,.22) !important;
+}
+
+/* Fallback selector for some Streamlit versions */
+div[data-testid="stTextInput"] input {
+  background: linear-gradient(135deg, rgba(242,140,108,.95) 0%, rgba(224,122,90,.92) 100%) !important;
+  color: #ffffff !important;
+}
+div[data-testid="stTextInput"] input::placeholder {
+  color: rgba(255,255,255,.85) !important;
+}
 </style>
     """,
     unsafe_allow_html=True,
