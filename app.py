@@ -279,7 +279,12 @@ def summarize_changes(cards: List[FindingCard]) -> Tuple[str, str, str]:
 # -----------------------------
 # Streamlit App
 # -----------------------------
-st.set_page_config(page_title="RECALL", layout="wide", page_icon="📋")
+st.set_page_config(
+    page_title="RECALL",
+    layout="wide",
+    page_icon="📋",
+    initial_sidebar_state="collapsed",  # ✅ mobile friendly (sidebar collapsed on phones)
+)
 
 # -----------------------------
 # VISUAL UPGRADE (CSS ONLY)
@@ -459,7 +464,6 @@ hr{
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
-
 /* Focus ring */
 .stTextInput input:focus,
 .stTextInput textarea:focus {
@@ -474,16 +478,91 @@ div[data-testid="stTextInput"] input[aria-label="Search term"]{
   color: #000000 !important;
   border: 1px solid rgba(0,0,0,.18) !important;
 }
-
 div[data-testid="stTextInput"] input[aria-label="Search term"]::placeholder{
   color: rgba(0,0,0,.55) !important;
 }
-
 div[data-testid="stTextInput"] input[aria-label="Search term"]:focus{
   border-color: rgba(0,0,0,.28) !important;
   box-shadow: 0 0 0 4px rgba(255,255,255,.22) !important;
 }
 
+/* -----------------------------
+   MOBILE RESPONSIVE OVERRIDES
+------------------------------*/
+@media (max-width: 768px){
+
+  /* tighter overall padding */
+  .block-container{
+    padding-top: 1.0rem !important;
+    padding-left: 0.85rem !important;
+    padding-right: 0.85rem !important;
+    padding-bottom: 1.4rem !important;
+  }
+
+  /* make any Streamlit horizontal blocks stack vertically */
+  div[data-testid="stHorizontalBlock"]{
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+  }
+  div[data-testid="stHorizontalBlock"] > div{
+    width: 100% !important;
+    min-width: 100% !important;
+  }
+
+  /* header becomes vertical + readable */
+  .recall-header{
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+  .recall-header-title{
+    font-size: 28px !important;
+    line-height: 1.05 !important;
+  }
+  .recall-header-tagline{
+    font-size: 13px !important;
+  }
+  .recall-header-badge{
+    font-size: 11px !important;
+  }
+
+  /* make buttons and selects feel "thumb friendly" */
+  .stButton > button{
+    width: 100% !important;
+    padding: 0.85rem 1.0rem !important;
+    border-radius: 16px !important;
+  }
+
+  /* inputs a bit taller on mobile + avoid iOS zoom */
+  input, textarea{
+    font-size: 16px !important;
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.75rem !important;
+  }
+
+  /* code blocks: wrap instead of forcing sideways scrolling */
+  pre, code{
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow-x: hidden !important;
+    font-size: 12px !important;
+  }
+
+  /* dataframe: allow horizontal scroll without breaking layout */
+  div[data-testid="stDataFrame"]{
+    overflow-x: auto !important;
+  }
+
+  /* metrics: less cramped */
+  div[data-testid="stMetric"]{
+    padding: 0.85rem 0.9rem !important;
+  }
+
+  /* sidebar: reduce padding */
+  div[data-testid="stSidebar"]{
+    padding-top: 0.75rem !important;
+  }
+}
 </style>
     """,
     unsafe_allow_html=True,
@@ -504,7 +583,7 @@ with st.sidebar:
 # -----------------------------
 st.markdown(
     """
-<div style="
+<div class="recall-header" style="
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -517,14 +596,14 @@ st.markdown(
   margin-bottom: 14px;
 ">
   <div>
-    <div style="font-size:34px; font-weight:900; letter-spacing:-0.03em; line-height:1;">
+    <div class="recall-header-title" style="font-size:34px; font-weight:900; letter-spacing:-0.03em; line-height:1;">
       RECALL<span style="color:#F28C6C;">.</span>
     </div>
-    <div style="color:#B8C0D0; font-weight:700; margin-top:6px;">
+    <div class="recall-header-tagline" style="color:#B8C0D0; font-weight:700; margin-top:6px;">
       FDA recall search • Similarity • Q&A
     </div>
   </div>
-  <div style="color:#9AA3B6; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:.12em;">
+  <div class="recall-header-badge" style="color:#9AA3B6; font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:.12em;">
     Safety intelligence
   </div>
 </div>
@@ -641,7 +720,8 @@ if cards:
             for c in cards
         ]
     )
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    # ✅ mobile-friendly height (no logic change)
+    st.dataframe(df, use_container_width=True, hide_index=True, height=420)
 
     st.divider()
     st.subheader("Find similar recalls (semantic)")
