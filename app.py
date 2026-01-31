@@ -458,26 +458,6 @@ hr{
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
-/* --- Keep white box, make typed text orange --- */
-.stTextInput input,
-.stTextInput textarea {
-  background: #ffffff !important;
-  color: #F28C6C !important;
-  font-weight: 800 !important;
-  caret-color: #F28C6C !important;
-}
-
-.stTextInput input::placeholder,
-.stTextInput textarea::placeholder {
-  color: #F28C6C !important;
-  opacity: 0.6;
-}
-
-.stTextInput input:focus,
-.stTextInput textarea:focus {
-  outline: none !important;
-  box-shadow: 0 0 0 3px rgba(242,140,108,.35) !important;
-}
 
 
 /* Focus ring */
