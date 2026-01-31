@@ -246,6 +246,7 @@ def _format_recall_date(yyyymmdd: str) -> str:
         return yyyymmdd
     try:
         from datetime import datetime
+
         dt = datetime.strptime(yyyymmdd, "%Y%m%d")
         return dt.strftime("%b ") + str(dt.day) + dt.strftime(", %Y")
     except Exception:
@@ -280,245 +281,103 @@ def summarize_changes(cards: List[FindingCard]) -> Tuple[str, str, str]:
 # -----------------------------
 st.set_page_config(page_title="RECALL", layout="wide", page_icon="📋")
 
-# RECALL theme: accent #F28C6C, background #313645, text #FFFFFF
+# -----------------------------
+# VISUAL UPGRADE (CSS ONLY)
+# -----------------------------
 st.markdown(
     """
-    <style>
-    /* RECALL brand colors */
-    .stApp { background-color: #1a1f28; }
-    h1, h2, h3 { color: #ffffff !important; font-weight: 700; }
-    .stMetric label { color: #b0b8c4 !important; }
-    [data-testid="stMetricValue"] { color: #ffffff !important; }
-    div[data-testid="stSidebar"] { background: linear-gradient(180deg, #313645 0%, #252a33 100%); }
-    div[data-testid="stSidebar"] .stMarkdown { color: #ffffff; }
-    .stButton > button { background-color: #F28C6C !important; color: #ffffff !important; font-weight: 600; border: none; }
-    .stButton > button:hover { background-color: #e07a5a !important; color: #ffffff !important; }
-    hr { border-color: #F28C6C33 !important; }
-    .recall-summary {
-        font-family: sans-serif;
-        background: linear-gradient(135deg, #252a33 0%, #313645 100%);
-        border-left: 4px solid #F28C6C;
-        padding: 1rem 1.25rem;
-        border-radius: 0 8px 8px 0;
-        margin: 0.5rem 0;
-        color: #FFFFFF;
-    }
-    .recall-summary-title {
-        font-weight: 700;
-        font-size: 0.95rem;
-        color: #F28C6C;
-        margin-bottom: 0.6rem;
-    }
-    .recall-summary p {
-        margin: 0.35rem 0;
-        font-size: 0.95rem;
-    }
-    .recall-summary-label {
-        color: #b0b8c4;
-        margin-right: 0.35rem;
-    }
-    .recall-summary-value {
-        color: #FFFFFF;
-        font-weight: 600;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+<style>
+/* ---------- Brand Tokens ---------- */
+:root{
+  --bg: #2F3545;            /* brand slate/navy */
+  --bg2:#262B38;            /* deeper */
+  --panel:#30384A;          /* panels */
+  --panel2:#2A3040;         /* hover / deeper panels */
+  --text:#FFFFFF;           /* primary text */
+  --muted:#B8C0D0;          /* secondary text */
+  --muted2:#9AA3B6;         /* tertiary text */
+  --accent:#F28C6C;         /* coral accent */
+  --accent2:#E07A5A;        /* hover coral */
+  --border: rgba(255,255,255,.10);
+  --border2: rgba(242,140,108,.25);
+  --shadow: 0 12px 30px rgba(0,0,0,.35);
+  --shadow2: 0 10px 24px rgba(0,0,0,.25);
+  --radius: 16px;
+}
 
-with st.sidebar:
-    if LOGO_PATH.exists():
-        st.image(str(LOGO_PATH), use_container_width=True)
-    st.header("Search Settings")
-    category = st.selectbox("Category", ["drug", "food", "device"], index=0)
-    limit = st.slider("Max results", min_value=5, max_value=50, value=DEFAULT_LIMIT, step=5)
-    api_key = st.text_input("openFDA API key (optional)", type="password", value=os.getenv("OPENFDA_API_KEY", ""))
-    st.caption("Tip: API key helps rate limits, but this prototype works without it.")
+/* ---------- App Base ---------- */
+html, body, [class*="css"]  { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+.stApp {
+  background: radial-gradient(1000px 600px at 30% 10%, rgba(242,140,108,.10), rgba(0,0,0,0) 60%),
+              radial-gradient(900px 600px at 85% 25%, rgba(255,255,255,.06), rgba(0,0,0,0) 55%),
+              linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+  color: var(--text);
+}
 
-st.markdown("## RECALL")
-st.write(
-    "Type a **brand/product keyword** to see recalls. Then use:\n"
-    "- **Find similar recalls** (semantic search)\n"
-    "- **Ask RECALL** (LLM Q&A over retrieved results)\n"
-)
+h1,h2,h3,h4,h5,h6 { color: var(--text) !important; letter-spacing: -0.02em; }
+p, li, label, span, div { color: var(--text); }
+small, .stCaption, .stMarkdown p { color: var(--muted) !important; }
 
-col1, col2 = st.columns([2, 1], gap="large")
-with col1:
-    query = st.text_input("Search term", placeholder="e.g., Tylenol, Ozempic, lettuce, Philips")
-with col2:
-    run_btn = st.button("Search openFDA", use_container_width=True)
+/* Make the main container feel centered and premium */
+.block-container {
+  padding-top: 2.0rem;
+  padding-bottom: 2.5rem;
+  max-width: 1200px;
+}
 
-if "cards" not in st.session_state:
-    st.session_state.cards = []
-if "vectors" not in st.session_state:
-    st.session_state.vectors = None
-if "index" not in st.session_state:
-    st.session_state.index = None
+/* ---------- Sidebar ---------- */
+div[data-testid="stSidebar"]{
+  background: linear-gradient(180deg, rgba(48,56,74,.95) 0%, rgba(38,43,56,.95) 100%);
+  border-right: 1px solid var(--border);
+}
+div[data-testid="stSidebar"] .stMarkdown,
+div[data-testid="stSidebar"] label,
+div[data-testid="stSidebar"] span,
+div[data-testid="stSidebar"] p{
+  color: var(--text) !important;
+}
+div[data-testid="stSidebar"] [data-testid="stImage"] img{
+  border-radius: 14px;
+  box-shadow: var(--shadow2);
+}
 
-if run_btn and query.strip():
-    with st.spinner("Fetching recalls from openFDA..."):
-        try:
-            results = openfda_enforcement_search(category, query.strip(), limit=limit, api_key=api_key or None)
-        except requests.HTTPError as e:
-            st.error(f"openFDA request failed: {e}")
-            results = []
-        except Exception as e:
-            st.error(f"Unexpected error: {e}")
-            results = []
+/* ---------- Inputs (text/select/slider) ---------- */
+input, textarea {
+  background: rgba(255,255,255,.06) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 14px !important;
+  color: var(--text) !important;
+}
+input:focus, textarea:focus{
+  outline: none !important;
+  border-color: var(--border2) !important;
+  box-shadow: 0 0 0 4px rgba(242,140,108,.18) !important;
+}
 
-    cards = normalize_to_cards(category, results)
-    st.session_state.cards = cards
+div[data-baseweb="select"] > div {
+  background: rgba(255,255,255,.06) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 14px !important;
+}
+div[data-baseweb="select"] span{
+  color: var(--text) !important;
+}
+div[data-baseweb="select"]:focus-within > div{
+  border-color: var(--border2) !important;
+  box-shadow: 0 0 0 4px rgba(242,140,108,.18) !important;
+}
 
-    if not cards:
-        st.warning("No recalls found for that query. Try a broader keyword (e.g., 'salad', 'insulin', 'cheese').")
-    else:
-        with st.spinner("Building local embeddings + FAISS index..."):
-            model = load_embedder()
-            texts = [c.summary_text for c in cards]
-            vecs = embed_texts(model, texts)
-            st.session_state.vectors = vecs
-            st.session_state.index = build_faiss_index(vecs)
+div[data-testid="stSlider"] > div {
+  color: var(--text) !important;
+}
+div[data-testid="stSlider"] [data-baseweb="slider"] > div > div{
+  background: rgba(255,255,255,.10) !important;
+}
 
-        st.success(f"Loaded {len(cards)} recall records for semantic search and Q&A.")
-
-# --- Display results + insights ---
-cards: List[FindingCard] = st.session_state.cards
-
-if cards:
-    st.subheader("Quick insights")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Results", len(cards))
-    with c2:
-        st.metric("Category", category.upper())
-    with c3:
-        classifications = [c.classification for c in cards if c.classification]
-        top_cls = pd.Series(classifications).value_counts().index[0] if classifications else "N/A"
-        st.metric("Top classification", top_cls)
-
-    latest_date, top_class, top_status = summarize_changes(cards)
-    if latest_date or top_class or top_status:
-        a, b, c = escape(latest_date), escape(top_class), escape(top_status)
-        st.markdown(
-            '<div class="recall-summary">'
-            '<p class="recall-summary-title">Quick summary</p>'
-            + (f'<p><span class="recall-summary-label">Latest recall date</span> <span class="recall-summary-value">{a}</span></p>' if latest_date else '')
-            + (f'<p><span class="recall-summary-label">Most common classification</span> <span class="recall-summary-value">{b}</span></p>' if top_class else '')
-            + (f'<p><span class="recall-summary-label">Most common status</span> <span class="recall-summary-value">{c}</span></p>' if top_status else '')
-            + '</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.caption("No high-level summary available for this query.")
-
-    themes = top_themes(cards, n=6)
-    if themes:
-        st.write("**Common complaint themes (from recall reasons):**")
-        st.write(", ".join([f"`{t}` ({n})" for t, n in themes]))
-
-    st.divider()
-    st.subheader("Results")
-    df = pd.DataFrame(
-        [
-            {
-                "id": c.id,
-                "product": c.product[:140],
-                "firm": c.recalling_firm[:80],
-                "classification": c.classification,
-                "status": c.status,
-                "init_date": c.recall_initiation_date,
-                "reason": c.reason[:160],
-            }
-            for c in cards
-        ]
-    )
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    st.divider()
-    st.subheader("Find similar recalls (semantic)")
-
-    selected_id = st.selectbox(
-        "Pick a recall to find similar ones",
-        options=[c.id for c in cards],
-        format_func=lambda cid: next(
-            (f"{c.product[:80]} – {c.classification} – {c.recall_initiation_date}" for c in cards if c.id == cid),
-            cid,
-        ),
-    )
-
-    top_k = st.slider("Similar results", 3, 10, 5)
-    find_btn = st.button("Find similar", type="primary")
-
-    if find_btn and st.session_state.index is not None:
-        model = load_embedder()
-        selected_card = next(c for c in cards if c.id == selected_id)
-
-        qvec = embed_texts(model, [selected_card.summary_text])  # (1, dim)
-        scores, ids = faiss_search(st.session_state.index, qvec, top_k=top_k + 1)
-
-        # Filter out itself
-        similar = []
-        for score, idx in zip(scores, ids):
-            if idx < 0:
-                continue
-            cand = cards[int(idx)]
-            if cand.id == selected_card.id:
-                continue
-            similar.append((float(score), cand))
-            if len(similar) >= top_k:
-                break
-
-        st.write("### Selected")
-        st.code(selected_card.summary_text)
-
-        st.write("### Similar recalls")
-        if not similar:
-            st.warning("No similar items found (try increasing max results or broaden the search term).")
-        else:
-            for score, c in similar:
-                with st.expander(
-                    f"{c.product[:90]}  |  {c.classification}  |  {c.recall_initiation_date}  (score: {score:.3f})"
-                ):
-                    st.code(c.summary_text)
-                    st.caption(f"Firm: {c.recalling_firm} | Status: {c.status}")
-
-    st.divider()
-    st.subheader("Ask RECALL (AI Q&A)")
-
-    user_question = st.text_input(
-        "Ask a question about these recall results",
-        placeholder="e.g., What are the main reasons for these recalls? Any patterns?",
-    )
-
-    rag_k = st.slider("Number of recall records to use as context", 3, 12, 6)
-    ask_btn = st.button("Answer with AI")
-
-    if ask_btn and user_question.strip() and st.session_state.index is not None:
-        retrieved_cards = []
-        try:
-            with st.spinner("Retrieving relevant recalls + generating answer..."):
-                model = load_embedder()
-                qvec = embed_texts(model, [user_question.strip()])  # (1, dim)
-                scores, ids = faiss_search(st.session_state.index, qvec, top_k=rag_k)
-                for idx in ids:
-                    if idx >= 0:
-                        retrieved_cards.append(cards[int(idx)])
-                answer = answer_with_llm(user_question.strip(), retrieved_cards)
-            st.markdown("### AI Answer")
-            st.write(answer)
-            with st.expander("Show context used by AI"):
-                for c in retrieved_cards:
-                    st.code(c.summary_text)
-        except OSError as e:
-            st.error(
-                "**Could not load the AI model.** "
-                "The model is downloaded from the internet on first use. "
-                "Please check that you have internet access and try again. "
-                "If you're behind a firewall or offline, download the model once with: "
-                "`huggingface-cli download google/flan-t5-base` then set environment variable "
-                "`RECALL_MODEL_PATH` to the download folder (e.g. `~/cache/hub/models--google--flan-t5-base/snapshots/...`)."
-            )
-            st.caption(f"Details: {e}")
-
-else:
-    st.caption("Run a search to load recall records and enable semantic similarity + AI Q&A.")
+/* ---------- Buttons ---------- */
+.stButton > button{
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%) !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  border: 0 !important;
+  border-radius: 14px
