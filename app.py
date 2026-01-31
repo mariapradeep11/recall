@@ -686,6 +686,12 @@ div[data-testid="stSelectbox"]:has(div[aria-label="Pick a recall to find similar
   font-weight: 800 !important;
 }
 
+/* Make "Pick a recall to find similar ones" label white */
+div[data-testid="stSelectbox"] label{
+  color: #ffffff !important;
+  font-weight: 800 !important;
+}
+
 </style>
     """,
     unsafe_allow_html=True,
