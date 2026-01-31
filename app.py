@@ -293,6 +293,7 @@ if "category" not in st.session_state:
     st.session_state.category = "drug"
 if "limit" not in st.session_state:
     st.session_state.limit = DEFAULT_LIMIT
+# API key intentionally removed from UI. If you still set OPENFDA_API_KEY in env, it will be used.
 if "api_key" not in st.session_state:
     st.session_state.api_key = os.getenv("OPENFDA_API_KEY", "")
 
@@ -300,13 +301,11 @@ if "api_key" not in st.session_state:
 def _sync_from_sb():
     st.session_state.category = st.session_state.sb_category
     st.session_state.limit = st.session_state.sb_limit
-    st.session_state.api_key = st.session_state.sb_api_key
 
 
 def _sync_from_main():
     st.session_state.category = st.session_state.main_category
     st.session_state.limit = st.session_state.main_limit
-    st.session_state.api_key = st.session_state.main_api_key
 
 
 # -----------------------------
@@ -592,7 +591,7 @@ div[data-testid="stTextInput"] input[aria-label="Search term"]:focus{
 )
 
 # -----------------------------
-# Sidebar (synced)
+# Sidebar (synced) - NO API KEY UI
 # -----------------------------
 with st.sidebar:
     if LOGO_PATH.exists():
@@ -618,15 +617,7 @@ with st.sidebar:
         on_change=_sync_from_sb,
     )
 
-    st.text_input(
-        "openFDA API key (optional)",
-        type="password",
-        value=st.session_state.api_key,
-        key="sb_api_key",
-        on_change=_sync_from_sb,
-    )
-
-    st.caption("Tip: API key helps rate limits, but this prototype works without it.")
+    st.caption("Tip: This prototype works without an API key.")
 
 
 # -----------------------------
@@ -663,7 +654,7 @@ st.markdown(
 )
 
 # -----------------------------
-# Main-page Search Settings (for mobile) - synced
+# Main-page Search Settings (for mobile) - synced - NO API KEY UI
 # -----------------------------
 with st.expander("Search Settings", expanded=False):
     st.selectbox(
@@ -682,18 +673,11 @@ with st.expander("Search Settings", expanded=False):
         key="main_limit",
         on_change=_sync_from_main,
     )
-    st.text_input(
-        "openFDA API key (optional)",
-        type="password",
-        value=st.session_state.api_key,
-        key="main_api_key",
-        on_change=_sync_from_main,
-    )
 
 # Canonical values used by the app everywhere (sidebar OR main will update these)
 category = st.session_state.category
 limit = st.session_state.limit
-api_key = st.session_state.api_key
+api_key = st.session_state.api_key  # still supported via env var, but hidden from UI
 
 
 # -----------------------------
