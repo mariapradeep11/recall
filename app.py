@@ -458,23 +458,27 @@ hr{
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
-/* --- Make the main search textbox orange + readable --- */
+/* --- Keep white box, make typed text orange --- */
 .stTextInput input,
 .stTextInput textarea {
-  background: linear-gradient(135deg, rgba(242,140,108,.95) 0%, rgba(224,122,90,.92) 100%) !important;
-  color: #ffffff !important;
-  border: 1px solid rgba(255,255,255,.18) !important;
-  border-radius: 14px !important;
+  background: #ffffff !important;
+  color: #F28C6C !important;
   font-weight: 800 !important;
-  caret-color: #ffffff !important;
+  caret-color: #F28C6C !important;
 }
 
-/* Placeholder text */
 .stTextInput input::placeholder,
 .stTextInput textarea::placeholder {
-  color: rgba(255,255,255,.85) !important;
-  font-weight: 700 !important;
+  color: #F28C6C !important;
+  opacity: 0.6;
 }
+
+.stTextInput input:focus,
+.stTextInput textarea:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(242,140,108,.35) !important;
+}
+
 
 /* Focus ring */
 .stTextInput input:focus,
