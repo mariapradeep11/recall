@@ -641,6 +641,45 @@ div[data-testid="stSlider"] span {
   color: #ffffff !important;
 }
 
+/* ---------- Settings Card (sticky + clean) ---------- */
+.settings-card{
+  position: sticky;
+  top: 0;
+  z-index: 999;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 14px 30px rgba(0,0,0,.22);
+  backdrop-filter: blur(10px);
+  margin-bottom: 12px;
+}
+.settings-title{
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: rgba(255,255,255,.85);
+}
+
+/* Category label + any selectbox label -> WHITE */
+div[data-testid="stSelectbox"] label{
+  color: #ffffff !important;
+  font-weight: 800 !important;
+}
+
+/* Keep the selectbox input itself white with dark text */
+div[data-testid="stSelectbox"] > div > div{
+  background: #ffffff !important;
+  border: 1px solid rgba(0,0,0,.18) !important;
+}
+div[data-testid="stSelectbox"] span{
+  color: #000000 !important;
+}
+div[data-testid="stSelectbox"] svg{
+  fill: #000000 !important;
+}
+
 </style>
     """,
     unsafe_allow_html=True,
