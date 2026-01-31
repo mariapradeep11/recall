@@ -679,7 +679,23 @@ div[data-testid="stSelectbox"]:has(div[aria-label="Pick a recall to find similar
   color: #ffffff !important;
   font-weight: 800 !important;
 }
+/* =========================
+   FORCE ALL WIDGET LABELS TO WHITE
+   (Fixes: Category + Pick a recall to find similar ones)
+========================= */
+div[data-testid="stWidgetLabel"] label,
+div[data-testid="stWidgetLabel"] p,
+div[data-testid="stWidgetLabel"] span {
+  color: #ffffff !important;
+  font-weight: 800 !important;
+}
 
+/* Extra specificity for selectbox labels (Streamlit sometimes overrides) */
+div[data-testid="stSelectbox"] div[data-testid="stWidgetLabel"] label,
+div[data-testid="stSelectbox"] div[data-testid="stWidgetLabel"] p {
+  color: #ffffff !important;
+  font-weight: 800 !important;
+}
 
 </style>
     """,
