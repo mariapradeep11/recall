@@ -468,14 +468,22 @@ header {visibility: hidden;}
   border-color: rgba(255,255,255,.22) !important;
 }
 
-/* Fallback selector for some Streamlit versions */
-div[data-testid="stTextInput"] input {
-  background: linear-gradient(135deg, rgba(242,140,108,.95) 0%, rgba(224,122,90,.92) 100%) !important;
-  color: #ffffff !important;
+/* Make the main Search term input white with black text */
+div[data-testid="stTextInput"] input[aria-label="Search term"]{
+  background: #ffffff !important;
+  color: #000000 !important;
+  border: 1px solid rgba(0,0,0,.18) !important;
 }
-div[data-testid="stTextInput"] input::placeholder {
-  color: rgba(255,255,255,.85) !important;
+
+div[data-testid="stTextInput"] input[aria-label="Search term"]::placeholder{
+  color: rgba(0,0,0,.55) !important;
 }
+
+div[data-testid="stTextInput"] input[aria-label="Search term"]:focus{
+  border-color: rgba(0,0,0,.28) !important;
+  box-shadow: 0 0 0 4px rgba(255,255,255,.22) !important;
+}
+
 </style>
     """,
     unsafe_allow_html=True,
