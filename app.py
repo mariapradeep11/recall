@@ -712,7 +712,17 @@ st.markdown(
 # -----------------------------
 # Main-page Search Settings (for mobile) - synced - NO API KEY UI
 # -----------------------------
-with st.expander("Search Settings", expanded=False):
+st.markdown(
+    """
+<div class="settings-card">
+  <div class="settings-title">Search Settings</div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+sc1, sc2 = st.columns([1, 2], gap="large")
+with sc1:
     st.selectbox(
         "Category",
         ["drug", "food", "device"],
@@ -720,6 +730,7 @@ with st.expander("Search Settings", expanded=False):
         key="main_category",
         on_change=_sync_from_main,
     )
+with sc2:
     st.slider(
         "Max results",
         min_value=5,
@@ -729,6 +740,7 @@ with st.expander("Search Settings", expanded=False):
         key="main_limit",
         on_change=_sync_from_main,
     )
+
 
 # Canonical values used by the app everywhere (sidebar OR main will update these)
 category = st.session_state.category
