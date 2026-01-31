@@ -662,12 +662,6 @@ div[data-testid="stSlider"] span {
   color: rgba(255,255,255,.85);
 }
 
-/* Category label + any selectbox label -> WHITE */
-div[data-testid="stSelectbox"] label{
-  color: #ffffff !important;
-  font-weight: 800 !important;
-}
-
 /* Keep the selectbox input itself white with dark text */
 div[data-testid="stSelectbox"] > div > div{
   background: #ffffff !important;
@@ -686,11 +680,6 @@ div[data-testid="stSelectbox"]:has(div[aria-label="Pick a recall to find similar
   font-weight: 800 !important;
 }
 
-/* Make "Pick a recall to find similar ones" label white */
-div[data-testid="stSelectbox"] label{
-  color: #ffffff !important;
-  font-weight: 800 !important;
-}
 
 </style>
     """,
